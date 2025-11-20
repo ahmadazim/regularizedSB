@@ -1,0 +1,41 @@
+solver:
+  d: 4
+  target_shift: 2.0
+  n_particles: 4096
+  eps: 0.1
+  lam: 0.0
+  u_max: 5.0
+  T: 50
+  outer_loops: 100
+  beta_eff: 600.0
+  value_epochs: 5
+  policy_epochs: 5
+  seed: 123
+  target_type: sparse  # "full" or "sparse"
+
+value_net:
+  name: ValueNet
+  hidden: 64
+  lr: 1.0e-3
+
+policy_net:
+  name: PolicyNet
+  hidden: 64
+  lr: 1.0e-3
+
+logging:
+  output_dir: outputs
+  experiment_name: dGauss_run
+  save_every_outer: 0
+  save_final: true
+  save_samples: true
+
+penalty:
+  name: quadratic
+  params: {}
+
+metrics:
+  enabled: true
+  kernel_bandwidth: 1.0
+
+
