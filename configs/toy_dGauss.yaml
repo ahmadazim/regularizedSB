@@ -1,7 +1,7 @@
 solver:
   d: 4
   target_shift: 2.0
-  n_particles: 4096
+  n_particles: null  # use dataset size
   eps: 0.1
   lam: 0.0
   u_max: 5.0
@@ -29,6 +29,14 @@ logging:
   save_every_outer: 0
   save_final: true
   save_samples: true
+
+dataset:
+  source_path: data/toy_dataset.npz
+  target_path: data/toy_dataset.npz
+  source_key: source
+  target_key: target
+  limit: null
+  shuffle: true
 
 penalty:
   name: quadratic
