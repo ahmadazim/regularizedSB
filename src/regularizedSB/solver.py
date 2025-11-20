@@ -10,6 +10,7 @@ import torch
 from torch import nn
 
 from .config import (
+    DatasetConfig,
     ExperimentConfig,
     LoggingConfig,
     MetricsConfig,
@@ -23,6 +24,28 @@ from .terminalPenalties import TerminalPenaltyBundle, build_terminal_penalty
 from .train_utils import train_value_global
 
 DTYPE = np.float64
+
+
+def _load_numpy_array(path: str, key: Optional[str]) -> np.ndarray:
+    path = os.path.expanduser(path)
+    if path.endswith(".npz"):
+        with np.load(path) as data:
+            if key:
+                if key not in data:
+                    raise KeyError(f"Key '{key}' not found in {path}.")
+                arr = data[key]
+            else:
+                # Prefer conventional names before falling back to first entry
+                for candidate in ("data", "array", "arr_0", "source"):
+                    if candidate in data:
+                        arr = data[candidate]
+                        break
+                else:
+                    first_key = list(data.files)[0]
+                    arr = data[first_key]
+    else:
+        arr = np.load(path)
+    return np.asarray(arr, dtype=DTYPE)
 
 
 # -------------------------------
@@ -95,41 +118,104 @@ def eval_grad(
 
 class RegularizedSBSolver:
     """
-    Organized implementation of toyExample_dGauss.ipynb (cells 1-295) with config support.
+    Organized implementation of toyExample_dGauss.ipynb (cells 1-295) with config support,
+    now driven by user-provided datasets.
     """
 
-    def __init__(self, cfg: ExperimentConfig):
+    def __init__(
+        self,
+        cfg: ExperimentConfig,
+        source_data: Optional[np.ndarray] = None,
+        target_data: Optional[np.ndarray] = None,
+    ):
         self.cfg = cfg
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.rng = np.random.default_rng(cfg.solver.seed)
         self.dt = 1.0 / cfg.solver.T
-        self.target_mean = self._default_target_mean()
+
+        self.source_full, self.target_full = self._prepare_dataset(source_data, target_data)
+        self.n_particles = self._determine_particle_count(self.source_full.shape[0])
+        self.cfg.solver.n_particles = self.n_particles
+        self.X0 = self._select_particles(self.source_full, self.n_particles)
+        self.target_data = self.target_full
+        if self.target_data is None:
+            raise ValueError("Target dataset is required for terminal penalties and metrics.")
+        self.target_mean = self.target_data.mean(axis=0)
+
         self.penalty_bundle = self._build_penalty_bundle()
         self.target_mean = self.penalty_bundle.metadata.get("target_mean", self.target_mean)
         self.value_net = self._instantiate_value_net(cfg.value_net)
         self.policy_net = self._instantiate_policy_net(cfg.policy_net)
         self.v_opt = torch.optim.Adam(self.value_net.parameters(), lr=cfg.value_net.lr)
         self.u_opt = torch.optim.Adam(self.policy_net.parameters(), lr=cfg.policy_net.lr)
-        self.X0 = self._sample_source()
 
     # ---- setup helpers ----
-    def _default_target_mean(self) -> np.ndarray:
-        s = self.cfg.solver
-        if s.target_type == "full":
-            target_mean = np.full(s.d, s.target_shift, dtype=DTYPE)
-        elif s.target_type == "sparse":
-            target_mean = np.zeros(s.d, dtype=DTYPE)
-            target_mean[0] = s.target_shift
+    def _prepare_dataset(
+        self,
+        source_override: Optional[np.ndarray],
+        target_override: Optional[np.ndarray],
+    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+        ds_cfg = self.cfg.dataset
+
+        if source_override is not None:
+            source = np.asarray(source_override, dtype=DTYPE)
         else:
-            raise ValueError(f"Unknown target_type '{s.target_type}'")
-        return target_mean
+            if not ds_cfg.source_path:
+                raise ValueError("dataset.source_path must be provided in the config.")
+            source = _load_numpy_array(ds_cfg.source_path, ds_cfg.source_key)
+
+        if target_override is not None:
+            target = np.asarray(target_override, dtype=DTYPE)
+        else:
+            target_path = ds_cfg.target_path or ds_cfg.source_path
+            if target_path:
+                target = _load_numpy_array(target_path, ds_cfg.target_key)
+            else:
+                target = None
+
+        if target is None:
+            raise ValueError(
+                "Target data not found. Provide dataset.target_path or pass target_data explicitly."
+            )
+
+        d = self.cfg.solver.d
+        if source.shape[1] != d or target.shape[1] != d:
+            raise ValueError(
+                f"Dataset dimensionality mismatch (expected d={d}, "
+                f"got source={source.shape[1]}, target={target.shape[1]})."
+            )
+        limit = self.cfg.dataset.limit
+        if limit:
+            limit = min(limit, source.shape[0], target.shape[0])
+            source = source[:limit]
+            target = target[:limit]
+        return source.astype(DTYPE), target.astype(DTYPE)
+
+    def _determine_particle_count(self, available: int) -> int:
+        ds_limit = self.cfg.dataset.limit
+        capped = min(ds_limit, available) if ds_limit else available
+        s_limit = self.cfg.solver.n_particles or capped
+        return min(s_limit, capped)
+
+    def _select_particles(self, data: np.ndarray, count: int) -> np.ndarray:
+        if data.shape[0] == count:
+            return data.copy()
+        replace = data.shape[0] < count
+        if self.cfg.dataset.shuffle or replace:
+            idx = self.rng.choice(data.shape[0], size=count, replace=replace)
+        else:
+            idx = np.arange(count)
+        return data[idx].copy()
 
     def _build_penalty_bundle(self) -> TerminalPenaltyBundle:
         penalty_cfg: PenaltyConfig = self.cfg.penalty
+        params = dict(penalty_cfg.params)
+        if "target_samples" not in params and self.target_data is not None:
+            params["target_samples"] = self.target_data
         return build_terminal_penalty(
             penalty_cfg.name,
             target_mean=self.target_mean,
-            params=penalty_cfg.params,
+            params=params,
         )
 
     def _instantiate_value_net(self, net_cfg: NetworkConfig) -> nn.Module:
@@ -260,7 +346,7 @@ class RegularizedSBSolver:
 
         result = self._final_evaluation()
         if self.cfg.metrics.enabled:
-            target_samples = self.penalty_bundle.metadata.get("target_samples")
+            target_samples = self.penalty_bundle.metadata.get("target_samples", self.target_data)
             metrics_cfg: MetricsConfig = self.cfg.metrics
             metrics, _, _ = calculate_metrics(
                 self.X0,
@@ -398,10 +484,10 @@ def solve_from_config(cfg: ExperimentConfig) -> Dict[str, Any]:
     return solver.run()
 
 
-def run_d_sb_demo(
-    d: int = 2,
-    target_shift: float = 2.0,
-    n_particles: int = 4096,
+def run_regularized_sb(
+    source: np.ndarray,
+    target: np.ndarray,
+    *,
     eps: float = 0.1,
     lam: float = 0.0,
     u_max: float = 5.0,
@@ -413,14 +499,15 @@ def run_d_sb_demo(
     value_epochs: int = 5,
     policy_epochs: int = 5,
     seed: int = 123,
-    target_type: str = "sparse",
 ) -> Dict[str, Any]:
     """
-    Convenience wrapper that reproduces toyExample_dGauss.ipynb (cells 1–295).
+    Convenience wrapper to run the solver directly from in-memory datasets.
     """
+    d = source.shape[1]
+    n_particles = source.shape[0]
     solver_cfg = SolverConfig(
         d=d,
-        target_shift=target_shift,
+        target_shift=0.0,
         n_particles=n_particles,
         eps=eps,
         lam=lam,
@@ -431,19 +518,27 @@ def run_d_sb_demo(
         value_epochs=value_epochs,
         policy_epochs=policy_epochs,
         seed=seed,
-        target_type=target_type,
+        target_type="dataset",
     )
     value_cfg = NetworkConfig(name="ValueNet", hidden=value_hidden, lr=1e-3)
     policy_cfg = NetworkConfig(name="PolicyNet", hidden=policy_hidden, lr=1e-3)
-    logging_cfg = LoggingConfig(output_dir="outputs", experiment_name="notebook_demo", save_final=False, save_samples=False)
-    penalty_cfg = PenaltyConfig(name="quadratic", params={"target_type": target_type})
+    logging_cfg = LoggingConfig(
+        output_dir="outputs",
+        experiment_name="array_run",
+        save_final=False,
+        save_samples=False,
+    )
+    dataset_cfg = DatasetConfig(source_path="", target_path="")
+    penalty_cfg = PenaltyConfig(name="quadratic")
     metrics_cfg = MetricsConfig(enabled=False)
     exp_cfg = ExperimentConfig(
         solver=solver_cfg,
         value_net=value_cfg,
         policy_net=policy_cfg,
         logging=logging_cfg,
+        dataset=dataset_cfg,
         penalty=penalty_cfg,
         metrics=metrics_cfg,
     )
-    return solve_from_config(exp_cfg)
+    solver = RegularizedSBSolver(exp_cfg, source_data=source, target_data=target)
+    return solver.run()

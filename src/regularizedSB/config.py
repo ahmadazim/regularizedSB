@@ -18,7 +18,7 @@ class NetworkConfig:
 class SolverConfig:
     d: int = 2
     target_shift: float = 2.0
-    n_particles: int = 4096
+    n_particles: Optional[int] = None
     eps: float = 0.1
     lam: float = 0.0
     u_max: float = 5.0
@@ -28,7 +28,7 @@ class SolverConfig:
     value_epochs: int = 5
     policy_epochs: int = 5
     seed: int = 123
-    target_type: str = "sparse"
+    target_type: str = "dataset"
 
 
 @dataclass
@@ -56,11 +56,22 @@ class MetricsConfig:
 
 
 @dataclass
+class DatasetConfig:
+    source_path: str = ""
+    target_path: Optional[str] = None
+    source_key: Optional[str] = None
+    target_key: Optional[str] = None
+    limit: Optional[int] = None
+    shuffle: bool = True
+
+
+@dataclass
 class ExperimentConfig:
     solver: SolverConfig
     value_net: NetworkConfig
     policy_net: NetworkConfig
     logging: LoggingConfig
+    dataset: DatasetConfig
     penalty: PenaltyConfig = field(default_factory=PenaltyConfig)
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
     extra: Dict[str, Any] = field(default_factory=dict)
@@ -80,22 +91,20 @@ def load_config(path: str) -> ExperimentConfig:
     value_net = NetworkConfig(**raw.get("value_net", {}))
     policy_net = NetworkConfig(**raw.get("policy_net", {"name": "PolicyNet"}))
     logging = LoggingConfig(**raw.get("logging", {}))
+    dataset = DatasetConfig(**raw.get("dataset", {}))
     penalty = PenaltyConfig(**raw.get("penalty", {}))
     metrics = MetricsConfig(**raw.get("metrics", {}))
 
-    extra = {
-        k: v
-        for k, v in raw.items()
-        if k not in {"solver", "value_net", "policy_net", "logging", "penalty", "metrics"}
-    }
+    known_keys = {"solver", "value_net", "policy_net", "logging", "dataset", "penalty", "metrics"}
+    extra = {k: v for k, v in raw.items() if k not in known_keys}
+
     return ExperimentConfig(
         solver=solver,
         value_net=value_net,
         policy_net=policy_net,
         logging=logging,
+        dataset=dataset,
         penalty=penalty,
         metrics=metrics,
         extra=extra,
     )
-
-

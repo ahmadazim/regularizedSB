@@ -14,7 +14,7 @@ from .metrics import (
     plot_active_and_nuisance_densities,
     plot_mse_vs_lambda,
 )
-from .solver import RegularizedSBSolver, run_d_sb_demo, solve_from_config
+from .solver import RegularizedSBSolver, run_regularized_sb, solve_from_config
 
 __all__ = [
     "ValueNet",
@@ -31,7 +31,7 @@ __all__ = [
     "plot_active_and_nuisance_densities",
     "plot_mse_vs_lambda",
     "RegularizedSBSolver",
-    "run_d_sb_demo",
+    "run_regularized_sb",
     "solve_from_config",
 ]
 
