@@ -1,0 +1,27 @@
+{
+  "solver": {
+    "d": 4,
+    "target_shift": 2.0,
+    "n_particles": 4096,
+    "eps": 0.1,
+    "lam": 0.0,
+    "u_max": 5.0,
+    "T": 50,
+    "outer_loops": 100,
+    "beta_eff": 600.0,
+    "value_epochs": 5,
+    "policy_epochs": 5,
+    "seed": 123,
+    "target_type": "sparse"
+  },
+  "penalty": {
+    "name": "quadratic",
+    "params": {}
+  },
+  "target_mean": [
+    1.9857341534138975,
+    -0.0007961949887065414,
+    0.029271742618070373,
+    -0.004072020843429362
+  ]
+}

@@ -63,9 +63,6 @@ def cosine_similarity(x: np.ndarray, y: np.ndarray) -> np.ndarray:
 
 
 def centroid_distance(a: np.ndarray, b: np.ndarray) -> float:
-    """
-    Euclidean distance between centroids of point clouds `a` and `b`.
-    """
     return float(np.linalg.norm(np.mean(a, axis=0) - np.mean(b, axis=0)))
 
 
@@ -139,8 +136,6 @@ def calculate_metrics(
     return metrics, X_end, X_paths
 
 
-# === Notebook-inspired analysis helpers (toyExample_dGauss.ipynb 1-158) ===
-
 def extract_mse_stats(
     res: Dict[str, Dict[str, Dict[str, np.ndarray]]],
     d_sel: int,
@@ -181,7 +176,7 @@ def plot_active_and_nuisance_densities(
     bins: int = 80,
 ) -> None:
     """
-    Replicates notebook plotting utilities for active (dim 0) and nuisance dims.
+    Plotting utilities for active (dim 0) and nuisance dims.
     """
     if not lambdas:
         raise ValueError("`lambdas` must contain at least one value.")

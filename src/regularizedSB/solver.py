@@ -368,7 +368,7 @@ class RegularizedSBSolver:
 
         return result
 
-    # ---- inner steps from notebook ----
+    # ---- inner steps ----
     def _fit_terminal_boundary(self, XT: np.ndarray, YT: np.ndarray) -> None:
         n_particles = XT.shape[0]
         boundary_epochs = 1

@@ -1,6 +1,7 @@
-# -------------------------------
-# Neural nets
-# -------------------------------
+import torch
+from torch import nn
+
+
 class ValueNet(nn.Module):
     """
     Simple MLP for V_phi(t, x): input [t, x] -> scalar.
