@@ -92,11 +92,19 @@ def centroid_terminal(
     return g_vec, grad.astype(X.dtype)
 
 
-def _rbf_kernel(X: np.ndarray, Y: np.ndarray, bandwidth: float) -> np.ndarray:
-    diff = X[:, None, :] - Y[None, :, :]
-    dist2 = np.sum(diff * diff, axis=2)
-    return np.exp(-dist2 / (2.0 * bandwidth**2))
+def _compute_distance_matrix(X: np.ndarray, Y: np.ndarray) -> np.ndarray:
+    """
+    Compute squared Euclidean distance matrix efficiently: ||x - y||^2 = ||x||^2 + ||y||^2 - 2 <x, y>
+    Returns (N, M) matrix.
+    """
+    X_norm2 = np.sum(X**2, axis=1)[:, None]  # (N, 1)
+    Y_norm2 = np.sum(Y**2, axis=1)[None, :]  # (1, M)
+    dist2 = X_norm2 + Y_norm2 - 2.0 * (X @ Y.T)
+    return np.maximum(dist2, 0.0)
 
+def _rbf_kernel_matrix(X: np.ndarray, Y: np.ndarray, bandwidth: float) -> np.ndarray:
+    dist2 = _compute_distance_matrix(X, Y)
+    return np.exp(-dist2 / (2.0 * bandwidth**2))
 
 def mmd_terminal(
     X: np.ndarray,
@@ -105,23 +113,33 @@ def mmd_terminal(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Maximum mean discrepancy penalty between transported samples X and reference samples.
+    Memory-efficient implementation.
     """
     N = X.shape[0]
     M = target_samples.shape[0]
-    K_xx = _rbf_kernel(X, X, bandwidth)
-    K_xy = _rbf_kernel(X, target_samples, bandwidth)
+    sigma2 = bandwidth**2
+    
+    # Kernels
+    K_xx = _rbf_kernel_matrix(X, X, bandwidth)
+    K_xy = _rbf_kernel_matrix(X, target_samples, bandwidth)
+    K_yy = _rbf_kernel_matrix(target_samples, target_samples, bandwidth)
+    
     term_xx = K_xx.sum() / (N * N + 1e-8)
-    term_yy = _rbf_kernel(target_samples, target_samples, bandwidth).sum() / (M * M + 1e-8)
+    term_yy = K_yy.sum() / (M * M + 1e-8)
     term_xy = K_xy.sum() * 2.0 / (N * M + 1e-8)
     mmd2 = term_xx + term_yy - term_xy
-
-    # Gradient
-    diff_xx = X[:, None, :] - X[None, :, :]
-    grad_xx = (K_xx[..., None] * diff_xx).sum(axis=1) * (-2.0 / (bandwidth**2 * N * N + 1e-8))
-    diff_xy = X[:, None, :] - target_samples[None, :, :]
-    grad_xy = (K_xy[..., None] * diff_xy).sum(axis=1) * (2.0 / (bandwidth**2 * N * M + 1e-8))
+    
+    # Gradients
+    # Grad term XX: -2/(N^2 sigma^2) * [ X * sum(K_xx, axis=1) - K_xx @ X ]
+    k_xx_sum = K_xx.sum(axis=1)[:, None] # (N, 1)
+    grad_xx = (X * k_xx_sum - K_xx @ X) * (-2.0 / (sigma2 * N * N + 1e-8))
+    
+    # Grad term XY: 2/(NM sigma^2) * [ X * sum(K_xy, axis=1) - K_xy @ Y ]
+    k_xy_sum = K_xy.sum(axis=1)[:, None] # (N, 1)
+    grad_xy = (X * k_xy_sum - K_xy @ target_samples) * (2.0 / (sigma2 * N * M + 1e-8))
+    
     grad = grad_xx + grad_xy
-
+    
     g_vec = np.full(N, mmd2, dtype=X.dtype)
     return g_vec, grad.astype(X.dtype)
 
