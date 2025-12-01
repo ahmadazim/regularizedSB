@@ -1,0 +1,8 @@
+- The single cell dataset we're working with is from Srivatsan et al., 2020.
+- You can get the dataset from the GEO database: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE139944
+    - Get the data: wget -c "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE139nnn/GSE139944/suppl/GSE139944_RAW.tar"
+- Extract the data into a clean folder
+    - mkdir -p sc_data
+    - tar -xvf GSE139944_RAW.tar -C sc_data
+- Tools needed: scanpy anndata h5py scipy scikit-learn matplotlib seaborn
+- Then you can use process_sc_data.py to subset; be sure to open the file and specify what drug treatment you want and what cell types you want
